@@ -41,25 +41,25 @@ ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 ```
 
-#Install & Run
+# Install & Run
 
-##1. 가상환경 생성
+## 1. 가상환경 생성
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 ```
 
-##2. 의존성 설치
+## 2. 의존성 설치
 ```bash
 pip install -r requirements.txt
 ```
 
-##3. DB 마이그레이션
+## 3. DB 마이그레이션
 ```bash
 alembic upgrade head
 ```
 
-##4. 서버 실행
+## 4. 서버 실행
 ```bash
 uvicorn main:app --reload
 API Docs
