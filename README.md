@@ -34,32 +34,37 @@ BACKEND
 
 `.env.example`을 참고하여 `.env` 파일을 생성하세요.
 
-```
+```env
 DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/dbname
 SECRET_KEY=change-me
 ALGORITHM=HS256
 ACCESS_TOKEN_EXPIRE_MINUTES=60
 ```
-Install & Run
-1. 가상환경 생성
-bash
-코드 복사
+
+#Install & Run
+
+##1. 가상환경 생성
+```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-2. 의존성 설치
-bash
-코드 복사
+```
+
+##2. 의존성 설치
+```bash
 pip install -r requirements.txt
-3. DB 마이그레이션
-bash
-코드 복사
+```
+
+##3. DB 마이그레이션
+```bash
 alembic upgrade head
-4. 서버 실행
-bash
-코드 복사
+```
+
+##4. 서버 실행
+```bash
 uvicorn main:app --reload
 API Docs
 Swagger UI: http://127.0.0.1:8000/docs
+```
 
 Health Check
 /health
