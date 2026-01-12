@@ -1,6 +1,6 @@
-from pydantic import BaseModel, EmailStr
-
+import uuid
 from pydantic import BaseModel, EmailStr, Field
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -10,6 +10,10 @@ class RegisterRequest(BaseModel):
     phone: str
     grade: int
 
+class RegisterResponse(BaseModel):
+    id: uuid.UUID
+    email: EmailStr
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -17,3 +21,6 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+class DeleteMeRequest(BaseModel):
+    password: str

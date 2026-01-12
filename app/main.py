@@ -1,12 +1,22 @@
-from fastapi import FastAPI
-from fastapi import Depends
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from app.core.deps import get_db
 
+from app.core.config import settings
+from app.core.deps import get_db
 from app.routers import auth, users, admin
 
 app = FastAPI(title="Club Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(admin.router)
@@ -14,10 +24,6 @@ app.include_router(admin.router)
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-@app.get("/")
-def root():
-    return {"message": "Hello, FastAPI!"}
 
 @app.get("/db-ping")
 def db_ping(db: Session = Depends(get_db)):

@@ -11,6 +11,7 @@ class Role(str, Enum):
     GUEST = "GUEST"
     MEMBER = "MEMBER"
     ADMIN = "ADMIN"
+    SUPERADMIN = "SUPERADMIN"
 
 class User(Base):
     __tablename__ = "users"
