@@ -6,6 +6,7 @@ from app.core.deps import get_db
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.models.user import User
 from app.schemas.auth import RegisterRequest, LoginRequest, TokenResponse
+from app.schemas.user import Role
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -22,7 +23,7 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         student_id=data.student_id,
         phone=data.phone,
         grade=data.grade,
-        role="GUEST"
+        role= Role.GUEST,
     )
     db.add(user)
     db.commit()
