@@ -66,17 +66,11 @@ API Docs
 Swagger UI: http://127.0.0.1:8000/docs
 ```
 
-Health Check
-/health
+## Health Check
+- /health
+- /db-ping
 
-/db-ping
-
-Notes
-.env 파일은 Git에 커밋하지 마세요.
-
-운영 환경에서는 환경변수로 설정하세요.
-
-yaml
-코드 복사
-
+## Notes
+- .env 파일은 Git에 커밋하지 마세요.
+- 운영 환경에서는 환경변수로 설정하세요.
 ---
