@@ -18,11 +18,12 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def upgrade() -> None:
-    """Upgrade schema."""
-    pass
+def upgrade():
+    op.add_column(
+        "users",
+        sa.Column("refresh_token_version", sa.Integer(), nullable=False, server_default="0")
+    )
+    op.alter_column("users", "refresh_token_version", server_default=None)
 
-
-def downgrade() -> None:
-    """Downgrade schema."""
-    pass
+def downgrade():
+    op.drop_column("users", "refresh_token_version")
