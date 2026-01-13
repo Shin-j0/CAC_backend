@@ -2,6 +2,7 @@
 # Python
 # ======================
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 *.pyd
@@ -51,6 +52,11 @@ alembic/versions/__pycache__/
 !.vscode/extensions.json
 
 # ======================
+# IDE
+# ======================
+.idea/
+
+# ======================
 # OS
 # ======================
 .DS_Store
@@ -64,7 +70,18 @@ htmlcov/
 .pytest_cache/
 
 # ======================
+# Lint / Type Check
+# ======================
+.mypy_cache/
+.ruff_cache/
+
+# ======================
 # Temporary files
 # ======================
 *.tmp
 *.swp
+
+# ======================
+# Node (future frontend)
+# ======================
+node_modules/

@@ -24,3 +24,14 @@ class TokenResponse(BaseModel):
 
 class DeleteMeRequest(BaseModel):
     password: str
+
+class EditProfileRequest(BaseModel):
+    name: str | None = None
+    phone: str | None = None
+    grade: int | None = None
+    current_password: str = Field(..., min_length=1)
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8)
+    confirm_password: str = Field(..., min_length=8)

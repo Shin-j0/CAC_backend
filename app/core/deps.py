@@ -72,6 +72,7 @@ def get_current_user(
     return user
 
 ROLE_LEVEL = {
+    Role.DELETED: -1,
     Role.GUEST: 0,
     Role.MEMBER: 1,
     Role.ADMIN: 2,

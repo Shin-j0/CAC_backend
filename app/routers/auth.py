@@ -1,6 +1,10 @@
-import uuid
 
+import uuid
+from jose import JWTError, ExpiredSignatureError
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -15,9 +19,11 @@ from app.core.security import (
 )
 
 from app.models.user import User, Role
-from app.schemas.auth import RegisterRequest, RegisterResponse, LoginRequest, TokenResponse, DeleteMeRequest
-
-from jose import JWTError, ExpiredSignatureError
+from app.schemas.auth import (
+    RegisterRequest, RegisterResponse, 
+    LoginRequest, TokenResponse, DeleteMeRequest, 
+    EditProfileRequest, ChangePasswordRequest
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -26,47 +32,101 @@ REFRESH_COOKIE_NAME = "refresh_token"
 # 회원가입 엔드포인트
 @router.post("/register", response_model=RegisterResponse)
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
-    exists = db.scalar(select(User).where(User.email == data.email))
-    if exists:
+
+    # 활성 계정이 이미 있으면 가입 불가
+    active = db.scalar(
+        select(User).where(
+            User.email == data.email,
+            User.is_deleted.is_(False),
+        )
+    )
+    if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )   
+            detail="Email already registered",
+        )
 
-    user = User(
-        email=data.email,
-        password_hash=get_password_hash(data.password),
-        name=data.name,
-        student_id=data.student_id,
-        phone=data.phone,
-        grade=data.grade,
-        role=Role.GUEST,
+    # 탈퇴 계정이 있으면 복구
+    deleted = db.scalar(
+        select(User).where(
+            User.email == data.email,
+            User.is_deleted.is_(True),
+        )
     )
-    db.add(user)
+
+    # 같은 학번을 다른 "활성 사용자"가 이미 쓰고 있으면 복구/가입 둘 다 막아야 함
+    if data.student_id:
+        student_active = db.scalar(
+            select(User).where(
+                User.student_id == data.student_id,
+                User.is_deleted.is_(False),
+            )
+        )
+        # 복구 대상(deleted)이 있고, 학번이 자기 자신이면 OK / 아니면 충돌
+        if student_active and (not deleted or student_active.id != deleted.id):
+            raise HTTPException(status_code=400, detail="Student ID already in use")
+
     try:
+        # 탈퇴 계정이 있으면 복구
+        if deleted:
+            deleted.is_deleted = False
+            deleted.deleted_at = None
+
+            deleted.password_hash = get_password_hash(data.password)
+            deleted.name = data.name
+            deleted.student_id = data.student_id
+            deleted.phone = data.phone
+            deleted.grade = data.grade
+
+            deleted.role = Role.GUEST
+
+            db.commit()
+            db.refresh(deleted)
+            return {"id": str(deleted.id), "email": deleted.email}
+
+        # 탈퇴 계정도 없으면 새로 생성
+        user = User(
+            email=data.email,
+            password_hash=get_password_hash(data.password),
+            name=data.name,
+            student_id=data.student_id,
+            phone=data.phone,
+            grade=data.grade,
+            role=Role.GUEST,
+            is_deleted=False,
+            deleted_at=None,
+        )
+        db.add(user)
         db.commit()
-    except Exception:
+        db.refresh(user)
+        return {"id": str(user.id), "email": user.email}
+
+    except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Database error")
-    db.refresh(user)
-    return {"id": str(user.id), "email": user.email}
+        raise HTTPException(status_code=400, detail="Email already registered")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
+
 
 # 로그인 엔드포인트
 @router.post("/login", response_model=TokenResponse)
 def login(data: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    user = db.scalar(select(User).where(User.email == data.email))
+    
+    user = db.scalar(select(User).where(User.email == data.email, User.is_deleted.is_(False)))
+
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
+    
     # guest는 로그인 불가
     if user.role == Role.GUEST:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Pending approval"
         )
-    
+
     access = create_access_token(subject=str(user.id))
-    refresh = create_refresh_token(subject=str(user.id))
+    refresh = create_refresh_token(subject=str(user.id), refresh_token_version=user.refresh_token_version)
 
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -89,20 +149,36 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing refresh token")
 
     try:
-        user_id = decode_refresh_token(token)
+        user_id, token_rtv = decode_refresh_token(token)
         user_uuid = uuid.UUID(user_id)
     except (ExpiredSignatureError, JWTError, ValueError):
+        response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/", domain=settings.COOKIE_DOMAIN)
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    # 유저 존재 확인(탈퇴/삭제 대응)
-    user = db.scalar(select(User).where(User.id == user_uuid))
+    user = db.scalar(
+        select(User).where(
+            User.id == user_uuid,
+            User.is_deleted.is_(False),
+        )
+    )
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/", domain=settings.COOKIE_DOMAIN)
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if token_rtv != user.refresh_token_version:
+        response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/", domain=settings.COOKIE_DOMAIN)
+        raise HTTPException(status_code=401, detail="Refresh token revoked")
+
+    user.refresh_token_version += 1
+    db.commit()
+    db.refresh(user)
 
     new_access = create_access_token(subject=str(user.id))
+    new_refresh = create_refresh_token(
+        subject=str(user.id),
+        refresh_token_version=user.refresh_token_version,
+    )
 
-    # (선택/권장) refresh rotation: refresh도 새로 발급해서 쿠키 교체
-    new_refresh = create_refresh_token(subject=str(user.id))
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=new_refresh,
@@ -116,9 +192,23 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
     return TokenResponse(access_token=new_access)
 
+
+
+
 # 로그아웃 엔드포인트
 @router.post("/logout")
-def logout(response: Response):
+def logout(
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_member),
+):
+    try:
+        user.refresh_token_version += 1
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
+
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
         path="/",
@@ -126,23 +216,35 @@ def logout(response: Response):
     )
     return Response(status_code=204)
 
+
 # 회원(본인) 탈퇴 엔드포인트
+
 @router.delete("/me")
 def delete_me(
     data: DeleteMeRequest,
     response: Response,
     db: Session = Depends(get_db),
-    member: User = Depends(get_current_member),
+    user : User = Depends(get_current_member),
 ):
-    if not verify_password(data.password, member.password_hash):
+    if not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid password")
 
+    if user.role in (Role.ADMIN, Role.SUPERADMIN):
+        raise HTTPException(status_code=403, detail="Admin users cannot delete")
+
+    if user.is_deleted:
+        return {"message": "User already deleted"}
+
     try:
-        db.delete(member)
+        user.is_deleted = True
+        user.deleted_at = datetime.now(timezone.utc)
+        user.role = Role.DELETED
+
+        user.refresh_token_version += 1
         db.commit()
-    except Exception:
+    except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail="Database error")
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
@@ -150,3 +252,91 @@ def delete_me(
         domain=settings.COOKIE_DOMAIN,
     )
     return {"message": "User deleted"}
+
+#회원 정보 수정 엔드포인트
+@router.patch("/edit")
+def edit_profile(
+    data: EditProfileRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_member),
+):
+    # 변경 사항 없으면 수정 x
+    changed = any([
+        data.name is not None,
+        data.phone is not None,
+        data.grade is not None,
+        data.new_password is not None,
+    ])
+    if not changed:
+        raise HTTPException(status_code=400, detail="No changes provided")
+
+    # 1) 현재 비밀번호로 본인 확인
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+
+    # 2) 프로필 부분 업데이트 (None이면 기존 유지)
+    if data.name is not None:
+        user.name = data.name
+    if data.phone is not None:
+        user.phone = data.phone
+    if data.grade is not None:
+        user.grade = data.grade
+
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
+
+    return {
+        "message": "profile updated",
+        "data": {
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "student_id": user.student_id,
+            "phone": user.phone,
+            "grade": user.grade,
+            "role": user.role.value,
+        },
+    }
+
+#비밀번호 수정 엔드포인트
+@router.patch("/password")
+def change_password(
+    data: ChangePasswordRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_member),
+):
+    # 1) 현재 비밀번호 확인
+    if not verify_password(data.current_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid password")
+
+    # 2) 새 비밀번호 확인
+    if data.new_password != data.confirm_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Passwords do not match")
+
+    # 3) 새 비밀번호가 기존과 같은지 방지
+    if verify_password(data.new_password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be different")
+
+    try:
+        user.password_hash = get_password_hash(data.new_password)
+        user.refresh_token_version += 1
+        db.commit()
+        db.refresh(user)
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
+
+    # refresh 쿠키 삭제 (비밀번호 바꿨으면 보통 다시 로그인 시킴)
+    response.delete_cookie(
+        key=REFRESH_COOKIE_NAME,
+        path="/",
+        domain=settings.COOKIE_DOMAIN,
+    )
+
+    return {"message": "Password updated. Please log in again."}

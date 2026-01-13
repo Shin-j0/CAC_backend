@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.deps import get_db
-from app.routers import auth, users, admin
+from app.routers import auth, users, admin, dues, admin_dues
 
 app = FastAPI(title="Club Backend")
 
@@ -20,6 +20,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(admin.router)
+app.include_router(dues.router)
+app.include_router(admin_dues.router)
 
 @app.get("/health")
 def health():
