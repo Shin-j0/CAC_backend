@@ -13,6 +13,14 @@ _PERIOD_RE = re.compile(r"^\d{4}-\d{2}$")
 def validate_period(period: str) -> None:
     if not _PERIOD_RE.match(period):
         raise ValueError("period must be in 'YYYY-MM' format")
+    try:
+        month = int(period.split("-")[1])
+    except Exception:
+        raise ValueError("period must be in 'YYYY-MM' format")
+
+    if month < 1 or month > 12:
+        raise ValueError("month must be between 01 and 12")
+
 
 
 def get_charge_by_period(db: Session, period: str) -> DuesCharge | None:
@@ -27,7 +35,7 @@ def create_charge(db: Session, *, period: str, amount: int, created_by: uuid.UUI
         raise ValueError("charge for that period already exists")
 
     charge = DuesCharge(period=period, amount=amount, created_by=created_by)
-    
+
     db.add(charge)
     db.flush()
     return charge
@@ -105,3 +113,4 @@ def admin_status_for_period(db: Session, *, period: str):
             st = "PAID"
         rows.append({"user": u, "amount_due": charge.amount, "paid_amount": paid, "status": st})
     return charge, rows
+

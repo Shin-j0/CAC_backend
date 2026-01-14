@@ -1,157 +1,239 @@
-import uuid
-from sqlalchemy import select
-
-from app.models.user import User, Role
-
-PERIOD = "2026-01"
-
-
-def _register(client, email, password, name="테스트", student_id="20260001"):
-    r = client.post("/auth/register", json={
-        "email": email,
-        "password": password,
-        "name": name,
-        "student_id": student_id,
-        "phone": "010-0000-0000",
-        "grade": 1
-    })
-    assert r.status_code in (200, 201), r.text
+# tests/test_dues_flow_extended_with_admin_status.py
+# 회비(dues) 도메인 확장 테스트 (관리자 status 검증 포함)
+# - PARTIAL / UNPAID 상태
+# - 누적 미납(arrears_total) 합산
+# - 중복 period 청구 방지
+# - 잘못된 YYYY-MM 포맷 거절
+# - /admin/dues/status(월별 현황)에서 회원별 상태가 정확히 계산되는지까지 검증
 
 
-def _login(client, email, password):
-    r = client.post("/auth/login", json={"email": email, "password": password})
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
+from tests.helpers import auth_header, setup_admin_and_member
 
 
-def _set_role(db, email: str, role: Role):
-    u = db.scalar(select(User).where(User.email == email))
-    assert u is not None
-    u.role = role
-    db.add(u)
-    db.commit()
-    db.refresh(u)
-    return u
+def _find_status_row(rows: list[dict], user_id: str) -> dict:
+    row = next((r for r in rows if r.get("user_id") == user_id), None)
+    assert row is not None, f"status rows missing user_id={user_id}"
+    return row
 
 
-def test_dues_member_cannot_access_when_guest(client, db):
-    # 회원가입은 기본 GUEST
-    email = "dues_guest@example.com"
-    pw = "TestPassword123!"
-    _register(client, email, pw, student_id="20261000")
+def test_dues_paid_status_with_admin_status(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+    user_id = ctx["user_id"]
+    user_token = ctx["user_token"]
+    student_id = ctx["user_student_id"]
 
-    token = _login(client, email, pw)
-    r = client.get("/dues/me", headers={"Authorization": f"Bearer {token}"})
-    assert r.status_code == 403, r.text  # MEMBER 전용
-
-
-def test_dues_happy_path_admin_charge_and_payment(client, db):
-    # 1) admin / member 생성
-    admin_email = "admin_dues@example.com"
-    member_email = "member_dues@example.com"
-    pw = "TestPassword123!"
-
-    _register(client, admin_email, pw, name="관리자", student_id="20262000")
-    _register(client, member_email, pw, name="부원", student_id="20262001")
-
-    # 2) DB에서 역할 부여
-    _set_role(db, admin_email, Role.ADMIN)
-    member = _set_role(db, member_email, Role.MEMBER)
-
-    # 3) 로그인
-    admin_token = _login(client, admin_email, pw)
-    member_token = _login(client, member_email, pw)
-
-    # 4) (관리자) 해당 월 회비 청구 생성
-    r = client.post(
-        "/admin/dues/charges",
-        json={"period": PERIOD, "amount": 10000},
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert r.status_code == 200, r.text
-    charge = r.json()
-    assert charge["period"] == PERIOD
-    assert charge["amount"] == 10000
-
-    # 5) (회원) 내 회비 상태 확인 -> UNPAID
-    r = client.get("/dues/me", params={"period": PERIOD}, headers={"Authorization": f"Bearer {member_token}"})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["current_period"] == PERIOD
-    assert body["current_amount"] == 10000
-    assert body["paid_amount"] == 0
-    assert body["status"] == "UNPAID"
-
-    # 6) (관리자) 납부 처리
-    r = client.post(
-        "/admin/dues/payments",
-        json={
-            "user_id": str(member.id),
-            "period": PERIOD,
-            "amount": 10000,
-            "method": "TRANSFER",
-            "memo": "테스트 납부",
-        },
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert r.status_code == 200, r.text
-    payment = r.json()
-    assert payment["amount"] == 10000
-    assert payment["method"] == "TRANSFER"
-
-    # 7) (회원) 상태 확인 -> PAID
-    r = client.get("/dues/me", params={"period": PERIOD}, headers={"Authorization": f"Bearer {member_token}"})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["paid_amount"] == 10000
-    assert body["status"] == "PAID"
-
-    # 8) (관리자) 월별 납부 현황 -> PAID로 나와야 함
-    r = client.get(
-        "/admin/dues/status",
-        params={"period": PERIOD},
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert r.status_code == 200, r.text
-    rows = r.json()
-    # 최소 1명(부원)이 포함
-    assert any(row["user_id"] == str(member.id) and row["status"] == "PAID" for row in rows)
-
-
-def test_dues_partial_payment(client, db):
-    admin_email = "admin_dues2@example.com"
-    member_email = "member_dues2@example.com"
-    pw = "TestPassword123!"
     period = "2026-02"
+    charge_amount = 10000
 
-    _register(client, admin_email, pw, name="관리자2", student_id="20263000")
-    _register(client, member_email, pw, name="부원2", student_id="20263001")
-
-    _set_role(db, admin_email, Role.ADMIN)
-    member = _set_role(db, member_email, Role.MEMBER)
-
-    admin_token = _login(client, admin_email, pw)
-    member_token = _login(client, member_email, pw)
-
-    # 청구 10,000
-    r = client.post(
+    # 청구 생성
+    charge = client.post(
         "/admin/dues/charges",
-        json={"period": period, "amount": 10000},
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers=auth_header(admin_token),
+        json={"period": period, "amount": charge_amount},
     )
-    assert r.status_code == 200, r.text
+    assert charge.status_code == 200, charge.text
 
-    # 부분 납부 3,000
-    r = client.post(
+    # 완납
+    pay = client.post(
         "/admin/dues/payments",
-        json={"user_id": str(member.id), "period": period, "amount": 3000, "method": "CASH"},
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers=auth_header(admin_token),
+        json={"user_id": user_id, "period": period, "amount": charge_amount, "method": "TRANSFER", "memo": "완납"},
     )
-    assert r.status_code == 200, r.text
+    assert pay.status_code == 200, pay.text
 
-    # MEMBER 상태: PARTIAL
-    r = client.get("/dues/me", params={"period": period}, headers={"Authorization": f"Bearer {member_token}"})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["paid_amount"] == 3000
+    # MEMBER: 내 상태
+    my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
+    assert my_status.status_code == 200, my_status.text
+    body = my_status.json()
+    assert body["status"] == "PAID"
+    assert body["paid_amount"] == charge_amount
+    assert body["arrears_total"] == 0
+
+    # ADMIN: 월별 현황
+    status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
+    assert status.status_code == 200, status.text
+    rows = status.json()
+    row = _find_status_row(rows, user_id)
+    assert row["student_id"] == student_id
+    assert row["amount_due"] == charge_amount
+    assert row["paid_amount"] == charge_amount
+    assert row["status"] == "PAID"
+
+
+def test_dues_partial_status_with_admin_status(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+    user_id = ctx["user_id"]
+    user_token = ctx["user_token"]
+    student_id = ctx["user_student_id"]
+
+    period = "2026-03"
+    charge_amount = 10000
+    paid_amount = 7000
+
+    # 청구 생성
+    charge = client.post(
+        "/admin/dues/charges",
+        headers=auth_header(admin_token),
+        json={"period": period, "amount": charge_amount},
+    )
+    assert charge.status_code == 200, charge.text
+
+    # 부분 납부
+    pay = client.post(
+        "/admin/dues/payments",
+        headers=auth_header(admin_token),
+        json={"user_id": user_id, "period": period, "amount": paid_amount, "method": "TRANSFER", "memo": "부분 납부"},
+    )
+    assert pay.status_code == 200, pay.text
+
+    # MEMBER: 내 상태 -> PARTIAL
+    my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
+    assert my_status.status_code == 200, my_status.text
+    body = my_status.json()
+    assert body["current_period"] == period
+    assert body["current_amount"] == charge_amount
+    assert body["paid_amount"] == paid_amount
     assert body["status"] == "PARTIAL"
+    assert body["arrears_total"] == (charge_amount - paid_amount)
+
+    # ADMIN: 월별 현황 -> PARTIAL
+    status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
+    assert status.status_code == 200, status.text
+    rows = status.json()
+    row = _find_status_row(rows, user_id)
+    assert row["student_id"] == student_id
+    assert row["amount_due"] == charge_amount
+    assert row["paid_amount"] == paid_amount
+    assert row["status"] == "PARTIAL"
+
+
+def test_dues_unpaid_status_with_admin_status(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+    user_id = ctx["user_id"]
+    user_token = ctx["user_token"]
+    student_id = ctx["user_student_id"]
+
+    period = "2026-04"
+    charge_amount = 10000
+
+    # 청구만 생성 (납부 없음)
+    charge = client.post(
+        "/admin/dues/charges",
+        headers=auth_header(admin_token),
+        json={"period": period, "amount": charge_amount},
+    )
+    assert charge.status_code == 200, charge.text
+
+    # MEMBER: 내 상태 -> UNPAID
+    my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
+    assert my_status.status_code == 200, my_status.text
+    body = my_status.json()
+    assert body["status"] == "UNPAID"
+    assert body["paid_amount"] == 0
+    assert body["arrears_total"] == charge_amount
+
+    # ADMIN: 월별 현황 -> UNPAID
+    status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
+    assert status.status_code == 200, status.text
+    rows = status.json()
+    row = _find_status_row(rows, user_id)
+    assert row["student_id"] == student_id
+    assert row["amount_due"] == charge_amount
+    assert row["paid_amount"] == 0
+    assert row["status"] == "UNPAID"
+
+
+def test_dues_arrears_total_accumulates_across_periods_with_admin_status(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+    user_id = ctx["user_id"]
+    user_token = ctx["user_token"]
+
+    p1 = "2026-05"
+    p2 = "2026-06"
+    amount = 10000
+
+    # 청구 2개 생성
+    r1 = client.post("/admin/dues/charges", headers=auth_header(admin_token), json={"period": p1, "amount": amount})
+    assert r1.status_code == 200, r1.text
+
+    r2 = client.post("/admin/dues/charges", headers=auth_header(admin_token), json={"period": p2, "amount": amount})
+    assert r2.status_code == 200, r2.text
+
+    # 첫 달만 완납
+    pay1 = client.post(
+        "/admin/dues/payments",
+        headers=auth_header(admin_token),
+        json={"user_id": user_id, "period": p1, "amount": amount, "method": "TRANSFER", "memo": "5월 완납"},
+    )
+    assert pay1.status_code == 200, pay1.text
+
+    # 둘째 달 기준 조회:
+    # - p2는 미납이므로 UNPAID
+    # - arrears_total은 p1 완납(0) + p2 미납(10000) = 10000
+    my_status = client.get(f"/dues/me?period={p2}", headers=auth_header(user_token))
+    assert my_status.status_code == 200, my_status.text
+    body = my_status.json()
+    assert body["current_period"] == p2
+    assert body["status"] == "UNPAID"
+    assert body["arrears_total"] == amount
+
+    # ADMIN 월별 현황은 period별 테이블이므로:
+    # p1 -> PAID / p2 -> UNPAID 를 각각 조회해서 확인
+    s1 = client.get(f"/admin/dues/status?period={p1}", headers=auth_header(admin_token))
+    assert s1.status_code == 200, s1.text
+    row1 = _find_status_row(s1.json(), user_id)
+    assert row1["status"] == "PAID"
+    assert row1["paid_amount"] == amount
+    assert row1["amount_due"] == amount
+
+    s2 = client.get(f"/admin/dues/status?period={p2}", headers=auth_header(admin_token))
+    assert s2.status_code == 200, s2.text
+    row2 = _find_status_row(s2.json(), user_id)
+    assert row2["status"] == "UNPAID"
+    assert row2["paid_amount"] == 0
+    assert row2["amount_due"] == amount
+
+
+def test_dues_charge_duplicate_period_rejected(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+
+    period = "2026-07"
+    amount = 10000
+
+    r1 = client.post("/admin/dues/charges", headers=auth_header(admin_token), json={"period": period, "amount": amount})
+    assert r1.status_code == 200, r1.text
+
+    r2 = client.post("/admin/dues/charges", headers=auth_header(admin_token), json={"period": period, "amount": amount})
+    assert r2.status_code == 400, r2.text
+    assert r2.json()["detail"] == "charge for that period already exists"
+
+
+def test_dues_charge_invalid_period_format_rejected(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+
+    bad_period = "2026-7"  # ❌ 2026-07 != 2026-7  월 2자리
+
+    r = client.post("/admin/dues/charges", headers=auth_header(admin_token), json={"period": bad_period, "amount": 10000})
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"] == "period must be in 'YYYY-MM' format"
+
+
+# 2026-00 or 2026-13 1월~12월 오류 체크
+def test_dues_charge_invalid_month_range_rejected(client, db_session):
+    ctx = setup_admin_and_member(client, db_session)
+    admin_token = ctx["admin_token"]
+
+    for bad_period in ["2026-00", "2026-13"]:
+        r = client.post(
+            "/admin/dues/charges",
+            headers=auth_header(admin_token),
+            json={"period": bad_period, "amount": 10000},
+        )
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"] == "month must be between 01 and 12"

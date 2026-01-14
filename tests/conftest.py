@@ -1,27 +1,39 @@
-import os
+# tests/conftest.py
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.main import app as fastapi_app
+from app.main import app
 from app.core.config import settings
 from app.core.deps import get_db
 from app.db.base import Base
 
-# ✅ 모델 import (Base.metadata에 테이블 등록)
-import app.models  # noqa: F401
+# ✅ 테이블 등록을 위해 모델 import (create_all 전에 필요)
+from app.models.user import User  # noqa: F401
+from app.models.dues import DuesCharge, DuesPayment  # noqa: F401
+from app.models.admin_log import AdminActionLog  # noqa: F401
 
 
-TEST_DB_URL = getattr(settings, "TEST_DATABASE_URL", None) or os.getenv("TEST_DATABASE_URL")
-if not TEST_DB_URL:
-    raise RuntimeError("TEST_DATABASE_URL is not set. Add it to .env or env var for tests.")
+@pytest.fixture(scope="function")
+def test_engine():
+    """테스트마다 DB 초기화(drop/create)"""
+    if not settings.TEST_DATABASE_URL:
+        raise RuntimeError("TEST_DATABASE_URL is not set. Check your .env")
 
-engine = create_engine(TEST_DB_URL, pool_pre_ping=True)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    engine = create_engine(settings.TEST_DATABASE_URL, pool_pre_ping=True)
+
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    yield engine
+
+    Base.metadata.drop_all(bind=engine)
 
 
-def override_get_db():
+@pytest.fixture()
+def db_session(test_engine):
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
     db = TestingSessionLocal()
     try:
         yield db
@@ -29,37 +41,13 @@ def override_get_db():
         db.close()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def setup_test_db():
-    """테스트 전체 시작/종료 때만 스키마 생성/삭제"""
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture(autouse=True)
-def clean_tables():
-    """각 테스트마다 데이터 초기화 (테이블은 유지, row만 삭제)"""
-    # FK 의존성 때문에 TRUNCATE ... CASCADE가 가장 깔끔함
-    with engine.begin() as conn:
-        conn.execute(text("TRUNCATE TABLE users, admin_action_logs, dues_charges, dues_payments RESTART IDENTITY CASCADE;"))
-
-
 @pytest.fixture()
-def db():
-    """테스트에서 직접 DB 조작할 때 쓰는 세션"""
-    session = TestingSessionLocal()
-    try:
-        yield session
-        session.commit()
-    finally:
-        session.close()
+def client(db_session):
+    """FastAPI get_db 의존성을 테스트 DB 세션으로 override"""
+    def _override_get_db():
+        yield db_session
 
-
-@pytest.fixture()
-def client():
-    fastapi_app.dependency_overrides[get_db] = override_get_db
-    with TestClient(fastapi_app) as c:
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app) as c:
         yield c
-    fastapi_app.dependency_overrides.clear()
+    app.dependency_overrides.clear()
