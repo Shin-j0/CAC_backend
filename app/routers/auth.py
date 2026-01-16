@@ -69,7 +69,7 @@ REFRESH_COOKIE_NAME = "refresh_token"
 
 """
 
-@router.post("/register", response_model=RegisterResponse)
+@router.post("/register")
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
     # 활성 계정이 이미 있으면 가입 불가
@@ -121,7 +121,12 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
             db.commit()
             db.refresh(deleted)
-            return {"id": str(deleted.id), "email": deleted.email}
+            return {
+                "data": {
+                    "id": str(deleted.id),
+                    "email": deleted.email,
+                }
+            }
 
         # 탈퇴 계정도 없으면 새로 생성
         user = User(
@@ -138,7 +143,12 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         db.add(user)
         db.commit()
         db.refresh(user)
-        return {"id": str(user.id), "email": user.email}
+        return {
+            "data": {
+                "id": str(user.id),
+                "email": user.email,
+            }
+        }
 
     except IntegrityError:
         db.rollback()
@@ -158,7 +168,7 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
 """
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login")
 def login(data: LoginRequest, response: Response, db: Session = Depends(get_db)):
 
     user = db.scalar(select(User).where(User.email == data.email, User.is_deleted.is_(False)))
@@ -187,7 +197,12 @@ def login(data: LoginRequest, response: Response, db: Session = Depends(get_db))
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
-    return TokenResponse(access_token=access)
+    return {
+        "data": {
+            "access_token": access,
+            "token_type": "bearer",
+        }
+    }
 
 """
 Access Token 재발급 API
@@ -198,7 +213,7 @@ Access Token 재발급 API
 
 """
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh")
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     token = request.cookies.get(REFRESH_COOKIE_NAME)
     if not token:
@@ -246,7 +261,12 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
     )
 
-    return TokenResponse(access_token=new_access)
+    return {
+        "data": {
+            "access_token": new_access,
+            "token_type": "bearer",
+        }
+    }
 
 """
 로그아웃 API
@@ -301,7 +321,11 @@ def delete_me(
         raise HTTPException(status_code=403, detail="Admin users cannot delete")
 
     if user.is_deleted:
-        return {"message": "User already deleted"}
+        return {
+            "data": {
+                "status": "already_deleted",
+            }
+        }
 
     try:
         user.is_deleted = True
@@ -319,7 +343,11 @@ def delete_me(
         path="/",
         domain=settings.COOKIE_DOMAIN,
     )
-    return {"message": "User deleted"}
+    return {
+        "data": {
+            "status": "deleted",
+        }
+    }
 
 """
 회원 정보 수정 API
@@ -366,7 +394,6 @@ def edit_profile(
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
     return {
-        "message": "profile updated",
         "data": {
             "id": str(user.id),
             "email": user.email,
@@ -423,4 +450,8 @@ def change_password(
         domain=settings.COOKIE_DOMAIN,
     )
 
-    return {"message": "Password updated. Please log in again."}
+    return {
+        "data": {
+            "status": "password_updated",
+        }
+    }

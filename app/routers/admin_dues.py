@@ -58,7 +58,7 @@ router = APIRouter(prefix="/admin/dues", tags=["admin-dues"])
 - 실제 비즈니스 검증 로직은 service(create_charge)에서 처리
 
 """
-@router.post("/charges", response_model=ChargeResponse)
+@router.post("/charges")
 def create_dues_charge(
     body: ChargeCreateRequest,
     db: Session = Depends(get_db),
@@ -74,7 +74,15 @@ def create_dues_charge(
         )
         db.commit()
         db.refresh(charge)
-        return charge
+        return {
+            "data": {
+                "id": str(charge.id),
+                "period": charge.period,
+                "amount": charge.amount,
+                "created_by": str(charge.created_by),
+                "created_at": charge.created_at.isoformat() if charge.created_at else None,
+            }
+        }
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -90,12 +98,27 @@ def create_dues_charge(
 - 최신 회비 청구가 상단에 오도록 정렬
 
 """
-@router.get("/charges", response_model=list[ChargeResponse])
+@router.get("/charges")
 def list_dues_charges(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin),
 ):
-    return db.scalars(select(DuesCharge).order_by(desc(DuesCharge.period))).all()
+    charges = db.scalars(select(DuesCharge).order_by(desc(DuesCharge.period))).all()
+    return {
+        "data": [
+            {
+                "id": str(c.id),
+                "period": c.period,
+                "amount": c.amount,
+                "created_by": str(c.created_by),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in charges
+        ],
+        "meta": {
+            "count": len(charges),
+        }
+    }
 
 """
 관리자 전용 회비 납부 기록 생성 API
@@ -105,7 +128,7 @@ def list_dues_charges(
 - 청구가 존재하지 않는 period에 대해서는 납부 불가
 
 """
-@router.post("/payments", response_model=PaymentResponse)
+@router.post("/payments")
 def create_dues_payment(
     body: PaymentCreateRequest,
     db: Session = Depends(get_db),
@@ -123,7 +146,18 @@ def create_dues_payment(
         )
         db.commit()
         db.refresh(payment)
-        return payment
+        return {
+            "data": {
+                "id": str(payment.id),
+                "user_id": str(payment.user_id),
+                "charge_id": str(payment.charge_id),
+                "amount": payment.amount,
+                "method": payment.method,
+                "memo": payment.memo,
+                "created_by": str(payment.created_by),
+                "created_at": payment.created_at.isoformat() if payment.created_at else None,
+            }
+        }
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -140,7 +174,7 @@ def create_dues_payment(
 - 해당 period의 회비 청구가 없으면 빈 리스트 반환
 
 """
-@router.get("/status", response_model=list[AdminDuesUserStatus])
+@router.get("/status")
 def status_for_period(
     period: str = Query(..., description="예: 2026-01"),
     db: Session = Depends(get_db),
@@ -153,19 +187,30 @@ def status_for_period(
 
     charge, rows = admin_status_for_period(db, period=period)
     if not charge:
-        return []
+        return {
+            "data": [],
+            "meta": {
+                "count": 0,
+            }
+        }
 
-    return [
-        AdminDuesUserStatus(
-            user_id=r["user"].id,
-            name=r["user"].name,
-            student_id=r["user"].student_id,
-            amount_due=r["amount_due"],
-            paid_amount=r["paid_amount"],
-            status=r["status"],
-        )
+    result = [
+        {
+            "user_id": str(r["user"].id),
+            "name": r["user"].name,
+            "student_id": r["user"].student_id,
+            "amount_due": r["amount_due"],
+            "paid_amount": r["paid_amount"],
+            "status": r["status"],
+        }
         for r in rows
     ]
+    return {
+        "data": result,
+        "meta": {
+            "count": len(result),
+        }
+    }
 
 
 """

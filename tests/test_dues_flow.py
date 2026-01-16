@@ -50,7 +50,7 @@ def test_dues_paid_status_with_admin_status(client, db_session):
     # MEMBER: 내 상태
     my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
     assert my_status.status_code == 200, my_status.text
-    body = my_status.json()
+    body = my_status.json()["data"]
     assert body["status"] == "PAID"
     assert body["paid_amount"] == charge_amount
     assert body["arrears_total"] == 0
@@ -58,7 +58,8 @@ def test_dues_paid_status_with_admin_status(client, db_session):
     # ADMIN: 월별 현황
     status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
     assert status.status_code == 200, status.text
-    rows = status.json()
+    rows = status.json()["data"]
+    assert len(rows) == status.json()["meta"]["count"]
     row = _find_status_row(rows, user_id)
     assert row["student_id"] == student_id
     assert row["amount_due"] == charge_amount
@@ -96,7 +97,7 @@ def test_dues_partial_status_with_admin_status(client, db_session):
     # MEMBER: 내 상태 -> PARTIAL
     my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
     assert my_status.status_code == 200, my_status.text
-    body = my_status.json()
+    body = my_status.json()["data"]
     assert body["current_period"] == period
     assert body["current_amount"] == charge_amount
     assert body["paid_amount"] == paid_amount
@@ -106,7 +107,8 @@ def test_dues_partial_status_with_admin_status(client, db_session):
     # ADMIN: 월별 현황 -> PARTIAL
     status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
     assert status.status_code == 200, status.text
-    rows = status.json()
+    rows = status.json()["data"]
+    assert len(rows) == status.json()["meta"]["count"]
     row = _find_status_row(rows, user_id)
     assert row["student_id"] == student_id
     assert row["amount_due"] == charge_amount
@@ -135,7 +137,7 @@ def test_dues_unpaid_status_with_admin_status(client, db_session):
     # MEMBER: 내 상태 -> UNPAID
     my_status = client.get(f"/dues/me?period={period}", headers=auth_header(user_token))
     assert my_status.status_code == 200, my_status.text
-    body = my_status.json()
+    body = my_status.json()["data"]
     assert body["status"] == "UNPAID"
     assert body["paid_amount"] == 0
     assert body["arrears_total"] == charge_amount
@@ -143,7 +145,8 @@ def test_dues_unpaid_status_with_admin_status(client, db_session):
     # ADMIN: 월별 현황 -> UNPAID
     status = client.get(f"/admin/dues/status?period={period}", headers=auth_header(admin_token))
     assert status.status_code == 200, status.text
-    rows = status.json()
+    rows = status.json()["data"]
+    assert len(rows) == status.json()["meta"]["count"]
     row = _find_status_row(rows, user_id)
     assert row["student_id"] == student_id
     assert row["amount_due"] == charge_amount
@@ -181,7 +184,7 @@ def test_dues_arrears_total_accumulates_across_periods_with_admin_status(client,
     # - arrears_total은 p1 완납(0) + p2 미납(10000) = 10000
     my_status = client.get(f"/dues/me?period={p2}", headers=auth_header(user_token))
     assert my_status.status_code == 200, my_status.text
-    body = my_status.json()
+    body = my_status.json()["data"]
     assert body["current_period"] == p2
     assert body["status"] == "UNPAID"
     assert body["arrears_total"] == amount
@@ -190,14 +193,18 @@ def test_dues_arrears_total_accumulates_across_periods_with_admin_status(client,
     # p1 -> PAID / p2 -> UNPAID 를 각각 조회해서 확인
     s1 = client.get(f"/admin/dues/status?period={p1}", headers=auth_header(admin_token))
     assert s1.status_code == 200, s1.text
-    row1 = _find_status_row(s1.json(), user_id)
+    s1_data = s1.json()["data"]
+    assert len(s1_data) == s1.json()["meta"]["count"]
+    row1 = _find_status_row(s1_data, user_id)
     assert row1["status"] == "PAID"
     assert row1["paid_amount"] == amount
     assert row1["amount_due"] == amount
 
     s2 = client.get(f"/admin/dues/status?period={p2}", headers=auth_header(admin_token))
     assert s2.status_code == 200, s2.text
-    row2 = _find_status_row(s2.json(), user_id)
+    s2_data = s2.json()["data"]
+    assert len(s2_data) == s2.json()["meta"]["count"]
+    row2 = _find_status_row(s2_data, user_id)
     assert row2["status"] == "UNPAID"
     assert row2["paid_amount"] == 0
     assert row2["amount_due"] == amount
