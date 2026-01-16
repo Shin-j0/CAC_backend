@@ -1,3 +1,33 @@
+"""
+admin.py
+
+관리자(Admin / SuperAdmin) 전용 사용자 관리 API 모음.
+
+이 파일은 동아리 회원의 상태 및 권한을 관리하기 위한 관리자 기능을 담당한다.
+회원 승인, 거절, 삭제, 권한 변경과 같은 "운영 관리 행위"를 한 곳에 모아
+권한 경계와 책임을 명확히 하기 위한 구조이다.
+
+주요 기능:
+- 대기(GUEST) 회원 승인 / 거절
+- 회원 권한 변경 (MEMBER / ADMIN)
+- 회원 삭제 (Soft Delete)
+- 전체 회원 / 삭제된 회원 조회
+- 관리자 활동 로그 조회
+
+설계 원칙:
+- 모든 엔드포인트는 관리자 권한을 요구
+- 위험한 작업(삭제, ADMIN 변경)은 SUPERADMIN만 허용
+- 실제 삭제는 Hard Delete가 아닌 Soft Delete 방식 사용
+  (is_deleted=True, role=DELETED)
+- 모든 관리 행위는 관리자 로그(admin_action_logs)에 기록
+
+관련 파일:
+- app.models.user              : User / Role 모델
+- app.models.admin_log         : 관리자 활동 로그 모델
+- app.services.admin           : 관리자 관련 비즈니스 로직
+- app.services.admin_log       : 관리자 로그 기록 로직
+"""
+
 import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from datetime import datetime, timezone
@@ -18,7 +48,17 @@ from app.services.admin import count_admins
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-# 관리자가 회원 권한을 변경하는 엔드포인트
+"""
+관리자 전용 회원 권한 변경 API
+
+- MEMBER / ADMIN 권한 변경을 처리
+- ADMIN 승격은 SUPERADMIN만 가능
+- SUPERADMIN은 승격/강등 불가
+- 자기 자신의 권한 변경은 금지
+- 마지막 ADMIN의 강등은 허용하지 않음
+- 변경 이력은 관리자 활동 로그에 기록
+
+"""
 @router.patch("/member/{user_id}/set_role")
 def set_role(
     user_id: uuid.UUID,
@@ -38,7 +78,7 @@ def set_role(
             status_code=400,
             detail=f"User already {user.role.value}"
         )
-    
+
     # 자기 자신 권한 변경 금지
     if user.id == current_admin.id:
         raise HTTPException(status_code=400, detail="Cannot change your own role")
@@ -48,7 +88,7 @@ def set_role(
         raise HTTPException(status_code=403, detail="Cannot promote to SUPERADMIN")
     if user.role == Role.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Cannot change SUPERADMIN role")
-    
+
     # ADMIN 승격은 SUPERADMIN만 가능
     if data.role == Role.ADMIN and current_admin.role != Role.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Only SUPERADMIN can promote to ADMIN")
@@ -77,7 +117,7 @@ def set_role(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
-    
+
     return {
         "message": "Role updated",
         "data": {
@@ -89,7 +129,13 @@ def set_role(
     }
 
 
-# 승인 대기 중인 회원 목록을 조회하는 엔드포인트
+"""
+승인 대기 중인(GUEST) 회원 목록 조회 API
+
+- 아직 승인되지 않은 회원만 조회
+- Soft Delete(is_deleted=True)된 회원은 제외
+
+"""
 @router.get("/guest/pending")
 def list_pending_users(
     db: Session = Depends(get_db),
@@ -108,7 +154,13 @@ def list_pending_users(
         ]
     }
 
-# 대기자 승인 엔드포인트
+"""
+승인 대기 중인(GUEST) 회원 목록 조회 API
+
+- 아직 승인되지 않은 회원만 조회 -> role == GUSET 인 회원만
+- Soft Delete(is_deleted=True)된 회원은 제외
+
+"""
 @router.post("/guest/{user_id}/approve")
 def approve_user(
     user_id: uuid.UUID,
@@ -123,7 +175,7 @@ def approve_user(
         raise HTTPException(status_code=400, detail="User already approved")
 
     try:
-        
+
         user.role = Role.MEMBER
         write_admin_log(
             db,
@@ -149,7 +201,15 @@ def approve_user(
     },
 }
 
-# 대기자 거절 엔드포인트
+"""
+대기(GUEST) 회원 거절 API
+
+- 회원을 Soft Delete 처리
+- role을 DELETED로 변경
+- 자기 자신 거절은 불가
+- 거절 이력은 관리자 로그에 기록
+
+"""
 @router.post("/guest/{user_id}/reject")
 def reject_user(
     user_id: uuid.UUID,
@@ -170,7 +230,7 @@ def reject_user(
             status_code=400,
             detail=f"User already {user.role.value}"
         )
-    
+
     user_snapshot = {
         "id": str(user.id),
         "name": user.name,
@@ -203,7 +263,15 @@ def reject_user(
         "data": user_snapshot,
     }
 
-# 회원 삭제 엔드포인트
+"""
+회원 삭제 API (SUPERADMIN 전용)
+
+- Hard Delete가 아닌 Soft Delete 방식 사용
+- SUPERADMIN 계정은 삭제 불가
+- 마지막 ADMIN 계정은 삭제 불가
+- 삭제 이력은 관리자 로그에 기록
+
+"""
 @router.delete("/users/{user_id}")
 def delete_user_by_admin(
     user_id: uuid.UUID,
@@ -218,7 +286,7 @@ def delete_user_by_admin(
     # 자기 자신 삭제 금지
     if user.id == current_admin.id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")
-    
+
     # SUPERADMIN 삭제 금지
     if user.role == Role.SUPERADMIN:
         raise HTTPException(status_code=403, detail="Cannot delete SUPERADMIN user")
@@ -260,7 +328,13 @@ def delete_user_by_admin(
         "data": user_snapshot,
     }
 
-# 회원 상세 조회 엔드포인트(관리자 전용)
+"""
+관리자 전용 회원 상세 정보 조회 API
+
+- 단일 회원의 전체 정보 조회
+- 삭제 여부 및 삭제 시각 포함
+
+"""
 @router.get("/users/{user_id}/search")
 def get_user_details(
     user_id: uuid.UUID,
@@ -270,7 +344,7 @@ def get_user_details(
     user = db.scalar(select(User).where(User.id == user_id, User.is_deleted.is_(False)))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     return {
         "id": str(user.id),
         "email": user.email,
@@ -285,7 +359,13 @@ def get_user_details(
         "updated_at": user.updated_at.isoformat(),
     }
 
-# 전체 회원 목록 조회 엔드포인트(관리자 전용)
+"""
+관리자 전용 전체 회원 목록 조회 API
+
+- Soft Delete되지 않은 활성 회원만 조회
+- 학번 기준 정렬
+
+"""
 @router.get("/users/all")
 def list_all_users(
     db: Session = Depends(get_db),
@@ -310,6 +390,13 @@ def list_all_users(
         ]
     }
 
+"""
+삭제된(DELETED) 회원 목록 조회 API
+
+- Soft Delete된 회원만 조회
+- 최근 삭제 순으로 정렬
+
+"""
 @router.get("/users/deleted")
 def list_deleted_users(
     db: Session = Depends(get_db),
@@ -334,7 +421,14 @@ def list_deleted_users(
         ]
     }
 
-# 관리자 활동 로그 조회 엔드포인트
+"""
+관리자 활동 로그 조회 API
+
+- 회원 승인 / 거절 / 삭제 / 권한 변경 이력 조회
+- actor(행위자) / target(대상 사용자) 정보 포함
+- limit 파라미터로 조회 개수 제한 (최대 200)
+
+"""
 @router.get("/logs")
 def list_admin_logs(
     limit: int = 50,
@@ -363,7 +457,7 @@ def list_admin_logs(
                 "action": log.action,
                 "before_role": log.before_role,
                 "after_role": log.after_role,
-                
+
                 "actor": {
                     "id": str(actor.id),
                     "email": actor.email,
@@ -389,5 +483,3 @@ def list_admin_logs(
             "count": len(result),
         },
     }
-
-

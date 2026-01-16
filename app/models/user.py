@@ -1,3 +1,15 @@
+"""
+user.py
+
+사용자(User) 및 권한(Role) 모델 정의 파일.
+
+이 파일은 동아리 회원의 기본 정보와
+권한(Role), 탈퇴 상태(Soft Delete), 인증 관련 정보를 관리한다.
+
+모든 인증, 권한, 회비, 관리자 기능의 기준이 되는 핵심 모델이다.
+
+"""
+
 import uuid
 import datetime
 from enum import Enum
@@ -9,6 +21,18 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
 
+
+"""
+사용자 권한(Role) 정의
+
+- GUEST       : 가입 후 승인 대기 상태
+- MEMBER      : 일반 회원
+- ADMIN       : 관리자
+- SUPERADMIN  : 최고 관리자
+- DELETED     : 탈퇴(삭제) 처리된 사용자
+
+"""
+
 class Role(str, Enum):
     GUEST = "GUEST"
     MEMBER = "MEMBER"
@@ -16,6 +40,17 @@ class Role(str, Enum):
     SUPERADMIN = "SUPERADMIN"
     DELETED = "DELETED"
 
+
+
+"""
+사용자(User) 모델
+
+- email / student_id 는 고유 식별자
+- role을 통해 접근 권한 제어
+- is_deleted / deleted_at 으로 Soft Delete 지원
+- refresh_token_version 으로 강제 로그아웃 및 토큰 무효화 지원
+
+"""
 
 class User(Base):
     __tablename__ = "users"
@@ -33,8 +68,6 @@ class User(Base):
 
     grade: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    # ✅ role은 Enum 타입을 DB에 저장하려면 보통 sa.Enum(Role)로 지정하는 게 안전함
-    # 지금은 기존 코드 유지(문제 없으면 OK). 만약 enum 컬럼 타입으로 확실히 하려면 말해줘.
     role: Mapped[Role] = mapped_column(default=Role.GUEST)
 
     is_deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)

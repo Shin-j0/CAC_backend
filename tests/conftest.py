@@ -1,4 +1,17 @@
-# tests/conftest.py
+"""
+
+
+
+
+
+pytest 공통 fixture 설정 파일.
+- 테스트 DB 엔진/세션을 매 테스트마다 초기화(drop/create)하고,
+  FastAPI get_db 의존성을 테스트 DB 세션으로 override한다.
+
+
+
+
+"""
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -9,7 +22,7 @@ from app.core.config import settings
 from app.core.deps import get_db
 from app.db.base import Base
 
-# ✅ 테이블 등록을 위해 모델 import (create_all 전에 필요)
+
 from app.models.user import User  # noqa: F401
 from app.models.dues import DuesCharge, DuesPayment  # noqa: F401
 from app.models.admin_log import AdminActionLog  # noqa: F401

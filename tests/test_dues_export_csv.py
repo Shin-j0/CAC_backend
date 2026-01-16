@@ -1,11 +1,15 @@
-# tests/test_dues_export_csv.py
-# 관리자 CSV export 엔드포인트 테스트
-#
-# 기대:
-# - ADMIN만 접근 가능
-# - period 검증(YYYY-MM + month range) 반영
-# - CSV 헤더 + 해당 회원 row 포함
-# - Content-Disposition attachment
+"""
+
+
+
+
+
+관리자 회비 현황 CSV export 테스트.
+- ADMIN 접근, period 검증, CSV 헤더/데이터 행 포함,
+  Content-Disposition(attachment) 및 BOM(utf-8-sig) 처리 확인.
+
+
+"""
 
 import csv
 import io

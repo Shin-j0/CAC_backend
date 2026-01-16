@@ -1,3 +1,17 @@
+"""
+
+dues.py
+
+회비(Dues) 관련 데이터 모델 정의 파일.
+
+이 파일은 동아리 회비 시스템의 핵심 데이터 구조인
+회비 청구(DuesCharge)와 회비 납부(DuesPayment)를 정의한다.
+
+회비는 '청구 → 납부' 구조로 관리되며,
+부분 납부 및 추가 납부를 지원하도록 설계되었다.
+
+"""
+
 import uuid
 from datetime import datetime
 
@@ -7,6 +21,16 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+
+
+"""
+회비 청구(Dues Charge) 모델
+
+- 특정 기간(period)에 대해 회비를 얼마 청구했는지 기록
+- period는 'YYYY-MM' 형식 권장
+- 동일 period에 대한 중복 청구는 UniqueConstraint로 방지
+
+"""
 
 class DuesCharge(Base):
     """월(또는 분기) 회비 '청구' 레코드.
@@ -27,6 +51,15 @@ class DuesCharge(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
+
+"""
+회비 납부(Dues Payment) 모델
+
+- 특정 사용자(user)가 특정 회비 청구(charge)에 대해 납부한 기록
+- 부분 납부 / 추가 납부를 허용하기 위해 금액을 누적 합산 구조로 관리
+- 누가(created_by) 기록했는지 관리자 정보 포함
+
+"""
 
 class DuesPayment(Base):
     """회비 '납부' 레코드.

@@ -1,4 +1,16 @@
-# tests/test_refresh_flow.py
+"""
+
+
+
+
+
+
+Refresh 토큰 로테이션/폐기 통합 테스트.
+- refresh 호출 시 토큰이 회전되는지, 이전 refresh 토큰은 폐기되는지,
+  logout 시 재발급이 막히는지 검증한다.
+
+
+"""
 import uuid
 from tests.helpers import auth_header, create_admin_in_db
 

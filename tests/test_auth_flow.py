@@ -1,4 +1,16 @@
-# tests/test_auth_flow.py
+"""
+
+
+
+
+
+인증 기본 플로우 통합 테스트.
+- 회원가입(GUEST) → 승인 전 로그인 차단 → 관리자 승인 → 로그인 성공,
+  거절 후 재가입(복구) 흐름, 회원 탈퇴(멤버 OK / 관리자 금지)까지 검증한다.
+
+
+"""
+
 import uuid
 
 from tests.helpers import auth_header, create_admin_in_db

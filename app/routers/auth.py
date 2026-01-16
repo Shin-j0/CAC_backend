@@ -1,3 +1,33 @@
+"""
+auth.py
+
+인증(Authentication) 및 계정 관리 API 모음.
+
+이 파일은 회원 가입, 로그인, 토큰 재발급, 로그아웃과 같이
+사용자 인증 흐름 전반을 담당한다.
+JWT 기반 인증 방식을 사용하며, Access Token + Refresh Token 구조를 따른다.
+
+주요 기능:
+- 회원 가입 (탈퇴 계정 복구 포함)
+- 로그인 및 토큰 발급
+- Refresh Token 기반 Access Token 재발급
+- 로그아웃 (Refresh Token 무효화)
+- 회원 정보 수정 및 비밀번호 변경
+- 회원 본인 탈퇴 (Soft Delete)
+
+설계 원칙:
+- Access Token은 Authorization Header로 전달
+- Refresh Token은 HttpOnly Cookie로 관리
+- Refresh Token Version을 이용해 강제 로그아웃 / 토큰 무효화 처리
+- 회원 탈퇴는 Hard Delete가 아닌 Soft Delete 방식 사용
+
+관련 파일:
+- app.core.security        : 비밀번호 해시 / JWT 생성·검증
+- app.core.deps            : 인증 의존성(get_current_member)
+- app.models.user          : User / Role 모델
+- app.schemas.auth         : 인증 관련 요청/응답
+
+"""
 
 import uuid
 from jose import JWTError, ExpiredSignatureError
@@ -20,8 +50,8 @@ from app.core.security import (
 
 from app.models.user import User, Role
 from app.schemas.auth import (
-    RegisterRequest, RegisterResponse, 
-    LoginRequest, TokenResponse, DeleteMeRequest, 
+    RegisterRequest, RegisterResponse,
+    LoginRequest, TokenResponse, DeleteMeRequest,
     EditProfileRequest, ChangePasswordRequest
 )
 
@@ -29,7 +59,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "refresh_token"
 
-# 회원가입 엔드포인트
+"""
+회원 가입 API
+
+- 이메일 기준으로 신규 회원 가입
+- 탈퇴한 계정이 존재할 경우 계정을 복구하여 재가입 처리
+- 동일 학번을 사용하는 활성 계정이 있으면 가입 불가
+- 가입 시 기본 권한은 GUEST (관리자 승인 필요)
+
+"""
+
 @router.post("/register", response_model=RegisterResponse)
 def register(data: RegisterRequest, db: Session = Depends(get_db)):
 
@@ -109,15 +148,24 @@ def register(data: RegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
 
-# 로그인 엔드포인트
+"""
+로그인 API
+
+- 이메일 / 비밀번호 인증
+- 승인되지 않은 GUEST 계정은 로그인 불가
+- Access Token은 응답 바디로 반환
+- Refresh Token은 HttpOnly Cookie로 설정
+
+"""
+
 @router.post("/login", response_model=TokenResponse)
 def login(data: LoginRequest, response: Response, db: Session = Depends(get_db)):
-    
+
     user = db.scalar(select(User).where(User.email == data.email, User.is_deleted.is_(False)))
 
     if not user or not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-    
+
     # guest는 로그인 불가
     if user.role == Role.GUEST:
         raise HTTPException(
@@ -141,7 +189,15 @@ def login(data: LoginRequest, response: Response, db: Session = Depends(get_db))
 
     return TokenResponse(access_token=access)
 
-# 토큰 재발급 엔드포인트
+"""
+Access Token 재발급 API
+
+- Refresh Token 쿠키를 사용해 새로운 Access Token 발급
+- Refresh Token Version이 일치하지 않으면 재발급 거부
+- 재발급 시 Refresh Token을 회전(rotation)하여 보안 강화
+
+"""
+
 @router.post("/refresh", response_model=TokenResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     token = request.cookies.get(REFRESH_COOKIE_NAME)
@@ -192,10 +248,14 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
     return TokenResponse(access_token=new_access)
 
+"""
+로그아웃 API
 
+- Refresh Token Version 증가로 기존 토큰 무효화
+- 클라이언트의 Refresh Token 쿠키 삭제
 
+"""
 
-# 로그아웃 엔드포인트
 @router.post("/logout")
 def logout(
     response: Response,
@@ -217,7 +277,15 @@ def logout(
     return Response(status_code=204)
 
 
-# 회원(본인) 탈퇴 엔드포인트
+"""
+회원 본인 탈퇴 API
+
+- 본인 비밀번호 확인 후 탈퇴 처리
+- ADMIN / SUPERADMIN 계정은 탈퇴 불가
+- Soft Delete 방식으로 처리 (is_deleted=True, role=DELETED)
+- 탈퇴 시 모든 Refresh Token 무효화
+
+"""
 
 @router.delete("/me")
 def delete_me(
@@ -253,7 +321,15 @@ def delete_me(
     )
     return {"message": "User deleted"}
 
-#회원 정보 수정 엔드포인트
+"""
+회원 정보 수정 API
+
+- 이름 / 전화번호 / 학년 정보 수정
+- 변경 사항이 없으면 요청 거부
+- 현재 사용자 비밀번호 확인 필수
+
+"""
+
 @router.patch("/edit")
 def edit_profile(
     data: EditProfileRequest,
@@ -265,7 +341,7 @@ def edit_profile(
         data.name is not None,
         data.phone is not None,
         data.grade is not None,
-        data.new_password is not None,
+        data.current_password is not None,
     ])
     if not changed:
         raise HTTPException(status_code=400, detail="No changes provided")
@@ -302,7 +378,15 @@ def edit_profile(
         },
     }
 
-#비밀번호 수정 엔드포인트
+"""
+비밀번호 변경 API
+
+- 현재 비밀번호 확인 필수
+- 새 비밀번호는 기존 비밀번호와 달라야 함
+- 비밀번호 변경 시 Refresh Token 무효화
+
+"""
+
 @router.patch("/password")
 def change_password(
     data: ChangePasswordRequest,

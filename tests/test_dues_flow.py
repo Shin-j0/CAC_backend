@@ -1,10 +1,15 @@
-# tests/test_dues_flow_extended_with_admin_status.py
-# 회비(dues) 도메인 확장 테스트 (관리자 status 검증 포함)
-# - PARTIAL / UNPAID 상태
-# - 누적 미납(arrears_total) 합산
-# - 중복 period 청구 방지
-# - 잘못된 YYYY-MM 포맷 거절
-# - /admin/dues/status(월별 현황)에서 회원별 상태가 정확히 계산되는지까지 검증
+"""
+
+
+
+회비 도메인(청구/납부/상태) 통합 테스트.
+- PAID/PARTIAL/UNPAID 상태 계산, 누적 미납(arrears_total) 합산,
+  중복 청구 방지 및 period 형식/월 범위 검증,
+  관리자 월별 현황(/admin/dues/status) 결과까지 확인한다.
+
+
+
+"""
 
 
 from tests.helpers import auth_header, setup_admin_and_member

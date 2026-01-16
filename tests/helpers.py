@@ -1,4 +1,13 @@
-# tests/helpers.py
+"""
+
+
+테스트 헬퍼 함수 모음.
+- Authorization 헤더 생성, ADMIN 생성, ADMIN+승인된 MEMBER 세팅 등
+  반복되는 테스트 준비 과정을 공통화한다.
+
+
+"""
+
 import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy import select

@@ -1,119 +1,170 @@
-# 🛠 Backend Core Logic & Technologies
+# Club Backend (FastAPI)
 
-이 백엔드는 **동아리 홈페이지 운영을 위한 실제 서비스 수준의 기능**을 목표로 설계·구현되었습니다.  
-FastAPI를 기반으로 인증, 권한 관리, 회비 관리 등 핵심 도메인 로직을 중심으로 구성되어 있습니다.
-
----
-
-## 1. Backend Architecture
-
-- **FastAPI 기반 REST API**
-- 책임 분리를 고려한 계층 구조
-  - `routers` : HTTP 요청/응답 처리
-  - `services` : 비즈니스 로직 및 도메인 규칙
-  - `models` : SQLAlchemy ORM 기반 DB 스키마
-  - `schemas` : Pydantic 기반 요청/응답 검증
-
-> HTTP 로직과 비즈니스 로직을 분리하여 유지보수성과 확장성을 고려한 구조
+동아리 홈페이지용 백엔드 서버입니다.
+인증/권한 관리, 회원 관리, 회비 관리 기능을 FastAPI + SQLAlchemy 기반으로 제공합니다.
 
 ---
 
-## 2. Authentication & Authorization
+## 🧩 기술 스택
 
-- **JWT 기반 인증**
-  - Access Token + Refresh Token 구조
-- **Access Token**
-  - 짧은 만료 시간 (stateless)
-  - Authorization Header(`Bearer`)로 전달
-- **Refresh Token**
-  - HttpOnly Cookie 저장
-  - Rotation + Versioning 방식 적용
-
-### 🔐 Refresh Token Versioning
-- `refresh_token_version` 컬럼을 User 모델에 추가
-- 다음 상황에서 version 증가:
-  - 로그아웃
-  - 비밀번호 변경
-  - 회원 탈퇴
-- 기존 refresh token 자동 무효화 → 강제 로그아웃 효과
+* **Python 3.10+**
+* **FastAPI** – REST API 서버
+* **SQLAlchemy 2.x** – ORM
+* **PostgreSQL** – 데이터베이스
+* **Alembic** – DB 마이그레이션
+* **JWT (Access / Refresh Token)** – 인증
+* **pytest** – 테스트
 
 ---
 
-## 3. Role-Based Access Control (RBAC)
+## 📂 프로젝트 구조
 
-- 사용자 권한(Role) 기반 접근 제어
-  - `GUEST`, `MEMBER`, `ADMIN`, `SUPERADMIN`, `DELETED`
-- FastAPI Dependency를 활용한 권한 검증
-  - 관리자 전용 API (`/admin/**`)
-  - 일반 회원 전용 API (`/dues/**`)
-- 승인되지 않은 사용자(GUEST)는 로그인 제한
-
----
-
-## 4. Password & Security
-
-- 비밀번호 해싱 저장
-- 비밀번호 변경 시:
-  - 기존 비밀번호 검증
-  - 새 비밀번호 중복 방지
-  - `refresh_token_version` 증가
-  - 모든 기존 세션 무효화
-
----
-
-## 5. Dues (회비) Domain Logic
-
-### 📌 Charge (회비 청구)
-- 월 단위 회비 정책 (`YYYY-MM`)
-- 한 달에 하나의 charge만 허용 (Unique Constraint)
-- 회비 금액 변경 시 명확한 기준 제공
-
-### 📌 Payment (회비 납부)
-- 사용자별 납부 기록
-- 부분 납부 / 다회 납부 지원
-- `charge_id` 기준으로 청구와 납부 연결
-
-### 📊 상태 계산 로직
-- `PAID / PARTIAL / UNPAID / NO_CHARGE`
-- 사용자별 누적 미납액 계산
-- 관리자 월별 납부 현황 조회
+```text
+backend/
+├─ app/
+│  ├─ main.py              # 애플리케이션 진입점
+│  ├─ core/                # 설정 / 보안 / 의존성
+│  │  ├─ config.py
+│  │  ├─ security.py
+│  │  └─ deps.py
+│  ├─ db/                  # DB 세션 / Base
+│  │  ├─ base.py
+│  │  └─ session.py
+│  ├─ models/              # ORM 모델
+│  │  ├─ user.py
+│  │  ├─ dues.py
+│  │  └─ admin_log.py
+│  ├─ services/            # 비즈니스 로직
+│  │  ├─ admin.py
+│  │  ├─ admin_log.py
+│  │  └─ dues.py
+│  └─ routers/             # API 라우터
+│     ├─ auth.py
+│     ├─ users.py
+│     ├─ admin.py
+│     ├─ dues.py
+│     └─ admin_dues.py
+├─ scripts/
+│  └─ create_superadmin.py # 초기 SUPERADMIN 생성 스크립트
+├─ tests/                  # pytest 테스트 코드
+├─ alembic/                # DB 마이그레이션
+├─ .env.example
+├─ requirements.txt
+└─ README.md
+```
 
 ---
 
-## 6. Transaction Management
+## 🔐 인증 / 권한 구조
 
-- SQLAlchemy Session 기반 트랜잭션 관리
-- **Commit / Rollback 책임을 Router 계층에서 명확히 관리**
-  - Service: 로직 처리 (`add`, `flush`)
-  - Router: 트랜잭션 확정 (`commit`, `rollback`)
-- 예외 발생 시 세션 안정성 보장
+### Role 종류
 
----
+* `GUEST` : 가입 후 승인 대기
+* `MEMBER` : 일반 회원
+* `ADMIN` : 관리자
+* `SUPERADMIN` : 최고 관리자
+* `DELETED` : 탈퇴(Soft Delete)
 
-## 7. Validation & Error Handling
+### 인증 방식
 
-- Pydantic 기반 입력 검증
-- period(`YYYY-MM`) 정규식 검증
-- 비즈니스 오류(ValueError)는 400 응답
-- 시스템 오류는 FastAPI 전역 예외 처리로 전달 (500)
+* **Access Token**
 
----
+  * Authorization 헤더 (`Bearer <token>`)
+  * 짧은 만료 시간
 
-## 8. Development & Environment
+* **Refresh Token**
 
-- PostgreSQL + SQLAlchemy ORM
-- Alembic 마이그레이션 관리
-- 환경 변수(.env) 기반 설정 분리
-- CORS 설정 및 Cookie 옵션 관리
+  * HttpOnly Cookie
+  * refresh_token_version 기반 무효화 지원
 
 ---
 
-## Summary
+## 👤 회원 흐름
 
-이 프로젝트는 단순 CRUD를 넘어,
-- **실제 서비스에서 필요한 인증 구조**
-- **권한 기반 API 보호**
-- **도메인 중심 로직 설계**
-- **트랜잭션 및 보안 고려**
+1. 회원가입 → `GUEST`
+2. 관리자 승인 → `MEMBER`
+3. 로그인 가능
+4. 관리자 권한 부여 → `ADMIN`
+5. 탈퇴 시 → `DELETED` (Soft Delete)
 
-를 모두 반영한 **실전형 백엔드 구현**을 목표로 개발되었습니다.
+---
+
+## 💰 회비 관리 구조
+
+* **DuesCharge** : 월별 회비 청구 (YYYY-MM)
+* **DuesPayment** : 회비 납부 기록 (부분/추가 납부 허용)
+
+### 납부 상태
+
+* `PAID`
+* `PARTIAL`
+* `UNPAID`
+* `NO_CHARGE`
+
+---
+
+## 🧪 테스트
+
+```bash
+pytest
+```
+
+테스트 범위:
+
+* 인증/로그인/토큰 재발급 플로우
+* 관리자 승인/거절/삭제
+* 회비 청구/납부/상태 계산
+* CSV / XLSX export
+
+---
+
+## ⚙️ 환경 변수 설정
+
+```bash
+cp .env.example .env
+```
+
+`.env` 예시:
+
+```env
+DATABASE_URL=postgresql+psycopg2://user:password@localhost:5432/clubdb
+SECRET_KEY=change-this-secret
+REFRESH_SECRET_KEY=change-this-refresh-secret
+```
+
+---
+
+## 🚀 서버 실행
+
+```bash
+uvicorn app.main:app --reload
+```
+
+Swagger 문서:
+
+* [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+
+---
+
+## 🛠 초기 SUPERADMIN 생성
+
+서버 최초 세팅 시 1회 실행:
+
+```bash
+python -m scripts.create_superadmin
+```
+
+> 이미 SUPERADMIN이 존재하면 자동으로 스킵됩니다.
+
+---
+
+## 📌 설계 원칙 요약
+
+* **Router** : HTTP / 권한
+* **Service** : 비즈니스 로직
+* **Model** : 데이터 구조
+* **Soft Delete 기본 사용**
+* **권한(Role) 기반 접근 제어**
+
+---
+

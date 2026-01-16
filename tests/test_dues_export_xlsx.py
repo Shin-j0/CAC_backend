@@ -1,4 +1,16 @@
-# tests/test_dues_export_xlsx.py
+"""
+
+
+
+
+
+관리자 회비 현황 XLSX export 테스트.
+- ADMIN 접근, period 검증, attachment 헤더,
+  XLSX 응답 content-type 및 파일 시그니처(PK) 확인.
+
+
+
+"""
 from tests.helpers import auth_header, setup_admin_and_member
 
 

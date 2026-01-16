@@ -1,4 +1,16 @@
-# tests/test_dues_payments_export_csv.py
+"""
+
+
+
+
+
+관리자 회비 납부내역 CSV export 테스트.
+- 특정 period 납부 기록 2건 생성 후 export 결과(헤더/행 수/금액),
+  attachment 헤더 및 period 검증(400) 확인.
+
+
+
+"""
 import csv
 import io
 from tests.helpers import auth_header, setup_admin_and_member

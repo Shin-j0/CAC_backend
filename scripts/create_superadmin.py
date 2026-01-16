@@ -1,3 +1,22 @@
+"""
+
+SUPERADMIN 초기 계정 생성 스크립트.
+
+- 서버 최초 세팅 시 단 한 번 실행하는 용도
+- .env에 정의된 SUPERADMIN_* 환경 변수를 읽어
+  SUPERADMIN 계정을 생성한다.
+- 이미 SUPERADMIN 계정이 존재하면 생성하지 않고 종료한다.
+
+사용 목적:
+- 관리자 승인/권한 관리 API에 접근할 수 있는
+  최상위 관리자 계정을 안전하게 초기화하기 위함
+
+사용 방법
+- 가상환경 접속
+- (.venv) ~\backend~$ python -m scripts.create_superadmin
+
+"""
+
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -31,7 +50,7 @@ def main():
         )
         if email_exists:
             raise RuntimeError("Email already exists but is not SUPERADMIN")
-        
+
         user = User(
             email=email,
             password_hash=get_password_hash(password),
