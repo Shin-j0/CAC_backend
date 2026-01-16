@@ -49,6 +49,7 @@ def profile(current_user: User = Depends(get_current_member)):
         "student_id": current_user.student_id,
         "grade": current_user.grade,
         "phone": current_user.phone,
+        "role" : current_user.role.value,
     }
 
 """
