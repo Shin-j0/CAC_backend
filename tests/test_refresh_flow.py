@@ -22,7 +22,7 @@ def test_refresh_token_rotation_and_revocation(client, db_session):
 
     admin_login = client.post("/auth/login", json={"email": admin_email, "password": admin_password})
     assert admin_login.status_code == 200, admin_login.text
-    admin_token = admin_login.json()["access_token"]
+    admin_token = admin_login.json()["data"]["access_token"]
 
     user_email = f"user_{uuid.uuid4().hex[:6]}@test.com"
     user_password = "UserPassw0rd!"
@@ -33,14 +33,14 @@ def test_refresh_token_rotation_and_revocation(client, db_session):
         json={"email": user_email, "password": user_password, "name": "리프레시테스트유저", "student_id": user_student_id, "phone": "010-7777-8888", "grade": 2},
     )
     assert reg.status_code == 200, reg.text
-    user_id = reg.json()["id"]
+    user_id = reg.json()["data"]["id"]
 
     approve = client.post(f"/admin/guest/{user_id}/approve", headers=auth_header(admin_token))
     assert approve.status_code == 200, approve.text
 
     login = client.post("/auth/login", json={"email": user_email, "password": user_password})
     assert login.status_code == 200, login.text
-    access1 = login.json()["access_token"]
+    access1 = login.json()["data"]["access_token"]
     assert access1
     assert "refresh_token" in client.cookies
     refresh1 = client.cookies.get("refresh_token")
@@ -48,7 +48,7 @@ def test_refresh_token_rotation_and_revocation(client, db_session):
 
     r1 = client.post("/auth/refresh")
     assert r1.status_code == 200, r1.text
-    access2 = r1.json()["access_token"]
+    access2 = r1.json()["data"]["access_token"]
     assert access2
 
     refresh2 = client.cookies.get("refresh_token")

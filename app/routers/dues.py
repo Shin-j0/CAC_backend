@@ -46,7 +46,7 @@ router = APIRouter(prefix="/dues", tags=["dues"])
 - 누적 미납 금액(arrears_total)을 함께 반환
 
 """
-@router.get("/me", response_model=MyDuesStatusResponse)
+@router.get("/me")
 def my_dues_status(
     period: str | None = Query(default=None, description="예: 2026-01"),
     db: Session = Depends(get_db),
@@ -63,7 +63,15 @@ def my_dues_status(
         charge = db.scalar(select(DuesCharge).order_by(desc(DuesCharge.period)))
 
     if not charge:
-        return MyDuesStatusResponse(current_period=None, current_amount=0, paid_amount=0, status="NO_CHARGE", arrears_total=0)
+        return {
+            "data": {
+                "current_period": None,
+                "current_amount": 0,
+                "paid_amount": 0,
+                "status": "NO_CHARGE",
+                "arrears_total": 0,
+            }
+        }
 
     paid = sum_paid_for_charge(db, user_id=current_user.id, charge_id=charge.id)
     if paid <= 0:
@@ -75,13 +83,15 @@ def my_dues_status(
 
     arrears = arrears_total(db, user_id=current_user.id)
 
-    return MyDuesStatusResponse(
-        current_period=charge.period,
-        current_amount=charge.amount,
-        paid_amount=paid,
-        status=status,
-        arrears_total=arrears,
-    )
+    return {
+        "data": {
+            "current_period": charge.period,
+            "current_amount": charge.amount,
+            "paid_amount": paid,
+            "status": status,
+            "arrears_total": arrears,
+        }
+    }
 
 """
 회원 본인 회비 납부 내역 조회 API
@@ -91,7 +101,7 @@ def my_dues_status(
 - period 미지정 시 전체 납부 내역을 최신순으로 반환
 
 """
-@router.get("/me/payments", response_model=list[PaymentResponse])
+@router.get("/me/payments")
 def my_payments(
     period: str | None = Query(default=None, description="예: 2026-01"),
     db: Session = Depends(get_db),
@@ -105,7 +115,12 @@ def my_payments(
 
         charge = db.scalar(select(DuesCharge).where(DuesCharge.period == period))
         if not charge:
-            return []
+            return {
+                "data": [],
+                "meta": {
+                    "count": 0,
+                }
+            }
 
         payments = db.scalars(
             select(DuesPayment)
@@ -120,4 +135,21 @@ def my_payments(
             .order_by(desc(DuesPayment.created_at))
         ).all()
 
-    return payments
+    return {
+        "data": [
+            {
+                "id": str(p.id),
+                "user_id": str(p.user_id),
+                "charge_id": str(p.charge_id),
+                "amount": p.amount,
+                "method": p.method,
+                "memo": p.memo,
+                "created_by": str(p.created_by),
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in payments
+        ],
+        "meta": {
+            "count": len(payments),
+        }
+    }

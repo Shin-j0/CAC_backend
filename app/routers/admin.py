@@ -119,7 +119,6 @@ def set_role(
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
     return {
-        "message": "Role updated",
         "data": {
             "id": str(user.id),
             "name": user.name,
@@ -151,7 +150,10 @@ def list_pending_users(
                 "student_id": u.student_id,
             }
             for u in pending
-        ]
+        ],
+        "meta": {
+            "count": len(pending),
+        }
     }
 
 """
@@ -191,15 +193,14 @@ def approve_user(
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
     return {
-    "message": "User approved",
-    "data": {
-        "id": str(user.id),
-        "name": user.name,
-        "email": user.email,
-        "before_role": Role.GUEST.value,
-        "after_role": Role.MEMBER.value,
-    },
-}
+        "data": {
+            "id": str(user.id),
+            "name": user.name,
+            "email": user.email,
+            "before_role": Role.GUEST.value,
+            "after_role": Role.MEMBER.value,
+        },
+    }
 
 """
 대기(GUEST) 회원 거절 API
@@ -259,7 +260,6 @@ def reject_user(
 
 
     return {
-        "message": "User rejected and deleted",
         "data": user_snapshot,
     }
 
@@ -324,7 +324,6 @@ def delete_user_by_admin(
         raise HTTPException(status_code=500, detail=f"Database error: {type(e).__name__}")
 
     return {
-        "message": "User deleted by admin",
         "data": user_snapshot,
     }
 
@@ -346,17 +345,19 @@ def get_user_details(
         raise HTTPException(status_code=404, detail="User not found")
 
     return {
-        "id": str(user.id),
-        "email": user.email,
-        "name": user.name,
-        "student_id": user.student_id,
-        "phone": user.phone,
-        "grade": user.grade,
-        "role": user.role.value,
-        "is_deleted": user.is_deleted,
-        "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
-        "created_at": user.created_at.isoformat(),
-        "updated_at": user.updated_at.isoformat(),
+        "data": {
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "student_id": user.student_id,
+            "phone": user.phone,
+            "grade": user.grade,
+            "role": user.role.value,
+            "is_deleted": user.is_deleted,
+            "deleted_at": user.deleted_at.isoformat() if user.deleted_at else None,
+            "created_at": user.created_at.isoformat(),
+            "updated_at": user.updated_at.isoformat(),
+        }
     }
 
 """
@@ -387,7 +388,10 @@ def list_all_users(
                 "role": u.role.value,
             }
             for u in users
-        ]
+        ],
+        "meta": {
+            "count": len(users),
+        }
     }
 
 """
@@ -418,7 +422,10 @@ def list_deleted_users(
                 "deleted_at": u.deleted_at.isoformat() if u.deleted_at else None,
             }
             for u in users
-        ]
+        ],
+        "meta": {
+            "count": len(users),
+        }
     }
 
 """

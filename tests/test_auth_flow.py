@@ -24,7 +24,7 @@ def test_register_approve_login_flow(client, db_session):
 
     admin_login = client.post("/auth/login", json={"email": admin_email, "password": admin_password})
     assert admin_login.status_code == 200, admin_login.text
-    admin_token = admin_login.json()["access_token"]
+    admin_token = admin_login.json()["data"]["access_token"]
 
     # 회원가입(GUEST)
     user_email = f"user_{uuid.uuid4().hex[:6]}@test.com"
@@ -43,7 +43,7 @@ def test_register_approve_login_flow(client, db_session):
         },
     )
     assert reg.status_code == 200, reg.text
-    user_id = reg.json()["id"]
+    user_id = reg.json()["data"]["id"]
 
     # 승인 전 로그인 차단(403)
     pending_login = client.post("/auth/login", json={"email": user_email, "password": user_password})
@@ -58,12 +58,12 @@ def test_register_approve_login_flow(client, db_session):
     # 승인 후 로그인 OK
     ok_login = client.post("/auth/login", json={"email": user_email, "password": user_password})
     assert ok_login.status_code == 200, ok_login.text
-    user_token = ok_login.json()["access_token"]
+    user_token = ok_login.json()["data"]["access_token"]
 
     # 보호 API
     profile = client.get("/users/profile", headers=auth_header(user_token))
     assert profile.status_code == 200, profile.text
-    assert profile.json()["role"] == "MEMBER"
+    assert profile.json()["data"]["role"] == "MEMBER"
 
 
 def test_register_reject_reregister_flow(client, db_session):
@@ -73,7 +73,7 @@ def test_register_reject_reregister_flow(client, db_session):
 
     admin_login = client.post("/auth/login", json={"email": admin_email, "password": admin_password})
     assert admin_login.status_code == 200, admin_login.text
-    admin_token = admin_login.json()["access_token"]
+    admin_token = admin_login.json()["data"]["access_token"]
 
     user_email = f"user_{uuid.uuid4().hex[:6]}@test.com"
     user_password = "UserPassw0rd!"
@@ -91,7 +91,7 @@ def test_register_reject_reregister_flow(client, db_session):
         },
     )
     assert reg.status_code == 200, reg.text
-    user_id = reg.json()["id"]
+    user_id = reg.json()["data"]["id"]
 
     reject = client.post(f"/admin/guest/{user_id}/reject", headers=auth_header(admin_token))
     assert reject.status_code == 200, reject.text
@@ -127,7 +127,7 @@ def test_delete_me_member_ok_and_admin_forbidden(client, db_session):
 
     admin_login = client.post("/auth/login", json={"email": admin_email, "password": admin_password})
     assert admin_login.status_code == 200, admin_login.text
-    admin_token = admin_login.json()["access_token"]
+    admin_token = admin_login.json()["data"]["access_token"]
 
     user_email = f"user_{uuid.uuid4().hex[:6]}@test.com"
     user_password = "UserPassw0rd!"
@@ -145,14 +145,14 @@ def test_delete_me_member_ok_and_admin_forbidden(client, db_session):
         },
     )
     assert reg.status_code == 200, reg.text
-    user_id = reg.json()["id"]
+    user_id = reg.json()["data"]["id"]
 
     approve = client.post(f"/admin/guest/{user_id}/approve", headers=auth_header(admin_token))
     assert approve.status_code == 200, approve.text
 
     login = client.post("/auth/login", json={"email": user_email, "password": user_password})
     assert login.status_code == 200, login.text
-    user_token = login.json()["access_token"]
+    user_token = login.json()["data"]["access_token"]
 
     # ❗ delete는 TestClient 버전 이슈 때문에 request로
     delete_me = client.request("DELETE", "/auth/me", headers=auth_header(user_token), json={"password": user_password})

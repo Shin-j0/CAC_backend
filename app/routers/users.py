@@ -44,11 +44,14 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("/profile")
 def profile(current_user: User = Depends(get_current_member)):
     return {
-        "name": current_user.name,
-        "email": current_user.email,
-        "student_id": current_user.student_id,
-        "grade": current_user.grade,
-        "phone": current_user.phone,
+        "data": {
+            "name": current_user.name,
+            "email": current_user.email,
+            "student_id": current_user.student_id,
+            "grade": current_user.grade,
+            "phone": current_user.phone,
+            "role": current_user.role.value,
+        }
     }
 
 """
@@ -69,12 +72,17 @@ def list_all_users(
         select(User)
         .where(User.role == Role.MEMBER, User.is_deleted.is_(False))
         .order_by(User.student_id)
-).all()
-    return [
-        {
-            "name": u.name,
-            "student_id": u.student_id,
-            "grade": u.grade,
+    ).all()
+    return {
+        "data": [
+            {
+                "name": u.name,
+                "student_id": u.student_id,
+                "grade": u.grade,
+            }
+            for u in users
+        ],
+        "meta": {
+            "count": len(users),
         }
-        for u in users
-    ]
+    }

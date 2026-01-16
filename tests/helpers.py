@@ -48,7 +48,7 @@ def setup_admin_and_member(client, db: Session):
 
     admin_login = client.post("/auth/login", json={"email": admin_email, "password": admin_password})
     assert admin_login.status_code == 200, admin_login.text
-    admin_token = admin_login.json()["access_token"]
+    admin_token = admin_login.json()["data"]["access_token"]
 
     user_email = f"user_{uuid.uuid4().hex[:6]}@test.com"
     user_password = "UserPassw0rd!"
@@ -66,7 +66,7 @@ def setup_admin_and_member(client, db: Session):
         },
     )
     assert reg.status_code == 200, reg.text
-    user_id = reg.json()["id"]
+    user_id = reg.json()["data"]["id"]
 
     approve = client.post(
         f"/admin/guest/{user_id}/approve",
@@ -76,7 +76,7 @@ def setup_admin_and_member(client, db: Session):
 
     user_login = client.post("/auth/login", json={"email": user_email, "password": user_password})
     assert user_login.status_code == 200, user_login.text
-    user_token = user_login.json()["access_token"]
+    user_token = user_login.json()["data"]["access_token"]
 
     return {
         "admin_email": admin_email,
